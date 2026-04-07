@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#43a047">
+<title>자일리앤 - 입냄새 관리</title>
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icon-16.png">
+<link rel="shortcut icon" href="favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="manifest" href="manifest.json">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:'Apple SD Gothic Neo','Pretendard','Malgun Gothic',sans-serif;background:#fff;overscroll-behavior:none}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:8px;border-radius:4px;background:#e0e0e0;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:28px;height:28px;border-radius:50%;background:#43a047;cursor:pointer;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.15)}
+button{font-family:inherit}
+.fade-in{animation:fadeIn 0.3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ─── Data Layer ───
+const SK = k => `xylian_${k}`;
+const load = (k, fb) => { try { const r = localStorage.getItem(SK(k)); return r ? JSON.parse(r) : fb; } catch { return fb; } };
+const save = (k, v) => { try { localStorage.setItem(SK(k), JSON.stringify(v)); } catch {} };
+const today = () => new Date().toISOString().split('T')[0];
+const fmtDate = (d) => { const dt = new Date(d+'T00:00:00'); return `${dt.getMonth()+1}/${dt.getDate()}`; };
+const fmtDateKr = (d) => { const dt = new Date(d+'T00:00:00'); const wd = ['일','월','화','수','목','금','토']; return `${dt.getMonth()+1}월 ${dt.getDate()}일 (${wd[dt.getDay()]})`; };
+const todayKr = () => { const d = new Date(); const wd = ['일요일','월요일','화요일','수요일','목요일','금요일','토요일']; return `${d.getMonth()+1}월 ${d.getDate()}일 ${wd[d.getDay()]}`; };
+
+const QUOTES = [
+  "입냄새 없는 하루, 자신감 있는 하루.","꾸준함이 입냄새를 이깁니다.","오늘도 한 포, 내일은 더 상쾌하게.",
+  "입안이 촉촉하면 냄새는 사라집니다.","당신의 첫인상, 입냄새가 결정합니다.","매일 관리하는 사람만이 자신감을 얻습니다.",
+  "입냄새 걱정 없는 대화, 가능합니다.","포기하지 마세요. 변화는 이미 시작됐습니다.","자일리앤과 함께라면, 가까이 말할 수 있습니다.",
+  "30일 뒤, 달라진 나를 만나세요.","양치 후 한 포, 그게 전부입니다.","입냄새는 관리하는 사람만 이길 수 있습니다."
+];
+const getQuote = () => QUOTES[new Date().getDate() % QUOTES.length];
+const DEFAULT_DAY = { tookSupplement:false, brushedMorning:false, brushedLunch:false, brushedNight:false, smellTest:5, confidence:5 };
+
+// ─── State ───
+let state = {
+  userName: load('userName',''),
+  records: load('records',{}),
+  tab: 0,
+  todayData: null,
+  statsRange: 'week',
+  activeDate: today()  // 현재 편집/조회 중인 날짜
+};
+function initToday() {
+  const key = state.activeDate;
+  state.todayData = state.records[key] ? {...DEFAULT_DAY, ...state.records[key]} : {...DEFAULT_DAY};
+}
+initToday();
+
+function saveTodayData() {
+  state.records[state.activeDate] = state.todayData;
+  save('records', state.records);
+}
+
+function setActiveDate(dateStr) {
+  if (!dateStr) return;
+  state.activeDate = dateStr;
+  initToday();
+  render();
+}
+
+function isToday(d) { return d === today(); }
+function dateHeaderKr(dateStr) {
+  const dt = new Date(dateStr + 'T00:00:00');
+  const wd = ['일요일','월요일','화요일','수요일','목요일','금요일','토요일'];
+  return `${dt.getMonth()+1}월 ${dt.getDate()}일 ${wd[dt.getDay()]}`;
+}
+
+// ─── Render Engine ───
+const $ = id => document.getElementById(id);
+const app = document.getElementById('app');
+
+function render() {
+  // activeDate가 설정되어 있으면 그 날짜의 데이터를 사용
+  if (!state.userName) { renderOnboarding(); return; }
+  const tabs = ['홈','기록','통계','설정'];
+  const icons = ['🏠','📋','📊','⚙️'];
+  let html = `<div style="max-width:480px;margin:0 auto;min-height:100vh;position:relative">`;
+  html += `<div id="content" class="fade-in" style="padding:24px 20px 160px">`;
+  if (state.tab === 0) html += renderHome();
+  else if (state.tab === 1) html += renderRecords();
+  else if (state.tab === 2) html += renderStats();
+  else html += renderSettings();
+  html += `</div>`;
+  // ─── 고정 배너 (모든 화면 공통) ───
+  html += `<div style="position:fixed;bottom:62px;left:0;right:0;z-index:99;display:flex;justify-content:center;pointer-events:none">
+    <div style="width:100%;max-width:480px;padding:0 12px;display:flex;gap:8px;box-sizing:border-box;pointer-events:auto">
+    <button onclick="openStore()" style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:14px 8px;background:linear-gradient(135deg,#43a047,#2e7d32);color:#fff;border:none;border-radius:14px;cursor:pointer;font-size:14px;font-weight:700;box-shadow:0 4px 12px rgba(67,160,71,0.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+      🛒 재구매하기
+    </button>
+    <button onclick="shareApp()" style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:14px 8px;background:linear-gradient(135deg,#ff8f00,#f57c00);color:#fff;border:none;border-radius:14px;cursor:pointer;font-size:14px;font-weight:700;box-shadow:0 4px 12px rgba(255,143,0,0.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+      📢 공유 · 할인
+    </button>
+    </div>
+  </div>`;
+  html += `<div style="position:fixed;bottom:0;left:0;right:0;z-index:100;display:flex;justify-content:center;pointer-events:none">
+    <div style="width:100%;max-width:480px;background:#fff;border-top:1px solid #f0f0f0;display:flex;padding:8px 0 max(8px,env(safe-area-inset-bottom));box-sizing:border-box;pointer-events:auto">`;
+  tabs.forEach((t,i) => {
+    const active = state.tab === i;
+    html += `<button onclick="setTab(${i})" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0;background:none;border:none;cursor:pointer">
+      <span style="font-size:22px;opacity:${active?1:0.4}">${icons[i]}</span>
+      <span style="font-size:11px;font-weight:700;color:${active?'#43a047':'#bbb'}">${t}</span>
+    </button>`;
+  });
+  html += `</div></div>`;
+  app.innerHTML = html;
+}
+
+function renderOnboarding() {
+  app.innerHTML = `
+  <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(160deg,#e8f5e9 0%,#f1f8e9 40%,#fffde7 100%);padding:32px">
+    <div style="font-size:48px;margin-bottom:8px">🌿</div>
+    <h1 style="font-size:28px;font-weight:800;color:#2e7d32;margin:0 0 8px">자일리앤</h1>
+    <p style="font-size:15px;color:#666;margin-bottom:40px;text-align:center;line-height:1.6">입냄새 관리의 시작.<br>매일 기록하고, 변화를 확인하세요.</p>
+    <div style="width:100%;max-width:320px">
+      <label style="font-size:14px;color:#888;font-weight:600;margin-bottom:8px;display:block">이름을 알려주세요</label>
+      <input id="nameInput" type="text" placeholder="이름을 입력하세요" style="width:100%;padding:16px 20px;font-size:18px;border:2px solid #c8e6c9;border-radius:14px;outline:none;box-sizing:border-box;background:#fff;font-family:inherit" onfocus="this.style.borderColor='#66bb6a'" onblur="this.style.borderColor='#c8e6c9'">
+      <button onclick="submitName()" style="width:100%;margin-top:20px;padding:16px 0;font-size:18px;font-weight:700;background:#43a047;color:#fff;border:none;border-radius:14px;cursor:pointer">시작하기</button>
+    </div>
+  </div>`;
+}
+
+function renderHome() {
+  const d = state.todayData;
+  const q = getQuote();
+  const checkBtn = (field, label, checked) => `
+    <button onclick="toggleCheck('${field}')" style="display:flex;align-items:center;gap:14px;width:100%;padding:18px 20px;background:${checked?'#e8f5e9':'#fafafa'};border:2px solid ${checked?'#66bb6a':'#eee'};border-radius:16px;cursor:pointer;margin-bottom:12px;text-align:left">
+      <div style="width:32px;height:32px;border-radius:10px;background:${checked?'#43a047':'#ddd'};display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;flex-shrink:0">${checked?'✓':''}</div>
+      <span style="font-size:17px;font-weight:600;color:${checked?'#2e7d32':'#888'}">${label}</span>
+    </button>`;
+  const valColor = v => v<=3?'#e53935':v<=6?'#fb8c00':'#43a047';
+  const slider = (field, label, emoji, val) => `
+    <div style="margin-bottom:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-size:16px;font-weight:700;color:#333">${emoji} ${label}</span>
+        <span style="font-size:22px;font-weight:800;color:${valColor(val)}">${val}</span>
+      </div>
+      <input type="range" min="1" max="10" value="${val}" oninput="setSlider('${field}',this.value)" style="width:100%">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:#aaa;margin-top:4px"><span>심함</span><span>거의없음</span></div>
+    </div>`;
+  return `
+    <div style="background:linear-gradient(135deg,#43a047,#66bb6a);border-radius:20px;padding:28px 24px;margin-bottom:20px;color:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <p style="font-size:14px;opacity:0.85;margin:0">${dateHeaderKr(state.activeDate)}${isToday(state.activeDate)?' · 오늘':''}</p>
+        ${!isToday(state.activeDate)?`<button onclick="setActiveDate(today())" style="background:rgba(255,255,255,0.25);border:none;color:#fff;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer">오늘로</button>`:''}
+      </div>
+      <h2 style="font-size:22px;font-weight:800;margin:8px 0 14px">${state.userName}님, ${isToday(state.activeDate)?'오늘도 관리하세요 🌿':'이 날의 기록입니다 📝'}</h2>
+      <p style="font-size:14px;opacity:0.9;line-height:1.5;font-style:italic">"${q}"</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px;padding:14px 16px;background:#f1f8e9;border:1px solid #dcedc8;border-radius:14px">
+      <span style="font-size:20px">📅</span>
+      <div style="flex:1">
+        <p style="font-size:11px;color:#689f38;margin:0 0 2px;font-weight:700">날짜 선택</p>
+        <input type="date" value="${state.activeDate}" max="${today()}" onchange="setActiveDate(this.value)" style="width:100%;font-size:15px;font-weight:700;color:#33691e;border:none;background:transparent;font-family:inherit;outline:none;padding:0">
+      </div>
+    </div>
+    <h3 style="font-size:18px;font-weight:800;color:#333;margin-bottom:16px">체크리스트</h3>
+    ${checkBtn('tookSupplement','자일리앤 복용 완료',d.tookSupplement)}
+    ${checkBtn('brushedMorning','아침 양치 완료',d.brushedMorning)}
+    ${checkBtn('brushedLunch','점심 양치 완료',d.brushedLunch)}
+    ${checkBtn('brushedNight','저녁 양치 완료',d.brushedNight)}
+    <div style="height:1px;background:#eee;margin:28px 0"></div>
+    <h3 style="font-size:18px;font-weight:800;color:#333;margin-bottom:20px">상태</h3>
+    ${slider('smellTest','입냄새 셀프테스트','👃',d.smellTest)}
+    ${slider('confidence','입냄새 자신감','💪',d.confidence)}`;
+}
+
+function renderRecords() {
+  const entries = Object.entries(state.records).sort((a,b) => b[0].localeCompare(a[0])).slice(0,30);
+  const dot = a => `<span style="display:inline-block;width:10px;height:10px;border-radius:5px;background:${a?'#43a047':'#ddd'};margin-right:4px"></span>`;
+  const valColor = v => v<=3?'#e53935':v<=6?'#fb8c00':'#43a047';
+  let html = `<h3 style="font-size:20px;font-weight:800;color:#333;margin-bottom:8px">기록 (최근 30일)</h3>
+    <p style="font-size:13px;color:#888;margin-bottom:20px">항목을 누르면 해당 날짜의 기록을 수정할 수 있습니다</p>`;
+  if (!entries.length) {
+    html += `<p style="color:#aaa;text-align:center;padding:40px">아직 기록이 없습니다.<br><br>홈에서 날짜를 선택하고<br>과거 기록을 입력할 수 있습니다.</p>`;
+  } else {
+    entries.forEach(([date,d]) => {
+      html += `<button onclick="goToDate('${date}')" style="display:block;width:100%;text-align:left;background:#fafafa;border-radius:16px;padding:16px 20px;margin-bottom:10px;border:1px solid #f0f0f0;cursor:pointer;font-family:inherit">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:15px;font-weight:700;color:#555">${fmtDateKr(date)} ${isToday(date)?'<span style="font-size:11px;color:#43a047">· 오늘</span>':''}</span>
+          <div>${dot(d.tookSupplement)}${dot(d.brushedMorning)}${dot(d.brushedLunch)}${dot(d.brushedNight)}</div>
+        </div>
+        <div style="display:flex;gap:16px;font-size:13px;color:#888">
+          <span>냄새 <b style="color:${valColor(d.smellTest)}">${d.smellTest}</b></span>
+          <span>자신감 <b style="color:${valColor(d.confidence)}">${d.confidence}</b></span>
+          <span style="margin-left:auto;color:#bbb;font-size:12px">수정하기 ›</span>
+        </div>
+      </button>`;
+    });
+  }
+  return html;
+}
+
+function goToDate(dateStr) {
+  state.activeDate = dateStr;
+  state.tab = 0;
+  initToday();
+  render();
+  window.scrollTo(0,0);
+}
+
+function renderStats() {
+  const days = state.statsRange === 'week' ? 7 : 30;
+  const now = new Date();
+  const data = [];
+  for (let i = days-1; i >= 0; i--) {
+    const d = new Date(now); d.setDate(d.getDate()-i);
+    const key = d.toISOString().split('T')[0];
+    const e = state.records[key];
+    data.push({ date: fmtDate(key), smell: e ? e.smellTest : null, conf: e ? e.confidence : null, supp: e?.tookSupplement ? 1 : 0 });
+  }
+  const valid = data.filter(d => d.smell !== null);
+  const avgSmell = valid.length ? (valid.reduce((s,d)=>s+d.smell,0)/valid.length).toFixed(1) : '-';
+  const avgConf = valid.length ? (valid.reduce((s,d)=>s+d.conf,0)/valid.length).toFixed(1) : '-';
+  const suppRate = data.length ? Math.round(data.filter(d=>d.supp).length/data.length*100) : 0;
+
+  const tabBtn = (r, label) => `<button onclick="setStatsRange('${r}')" style="flex:1;padding:12px 0;font-size:15px;font-weight:700;background:${state.statsRange===r?'#43a047':'#f5f5f5'};color:${state.statsRange===r?'#fff':'#999'};border:none;border-radius:12px;cursor:pointer">${label}</button>`;
+  const statCard = (label, val, color) => `<div style="flex:1;background:#fafafa;border-radius:14px;padding:16px 12px;text-align:center;border:1px solid #f0f0f0"><p style="font-size:12px;color:#999;margin:0 0 6px">${label}</p><p style="font-size:24px;font-weight:800;color:${color};margin:0">${val}</p></div>`;
+
+  // SVG Line Chart
+  const chartW = 340, chartH = 180, padL = 30, padR = 10, padT = 10, padB = 25;
+  const plotW = chartW - padL - padR, plotH = chartH - padT - padB;
+  const xStep = data.length > 1 ? plotW / (data.length - 1) : 0;
+
+  const makeLine = (field, color) => {
+    const points = [];
+    data.forEach((d, i) => {
+      if (d[field] !== null) {
+        const x = padL + i * xStep;
+        const y = padT + plotH - (d[field] / 10) * plotH;
+        points.push(`${x},${y}`);
+      }
+    });
+    return points.length > 1 ? `<polyline points="${points.join(' ')}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` : '';
+  };
+  const dots = (field, color) => {
+    let svg = '';
+    data.forEach((d, i) => {
+      if (d[field] !== null) {
+        const x = padL + i * xStep;
+        const y = padT + plotH - (d[field] / 10) * plotH;
+        svg += `<circle cx="${x}" cy="${y}" r="3" fill="${color}"/>`;
+      }
+    });
+    return svg;
+  };
+  let gridLines = '';
+  for (let v = 0; v <= 10; v += 2) {
+    const y = padT + plotH - (v / 10) * plotH;
+    gridLines += `<line x1="${padL}" y1="${y}" x2="${chartW-padR}" y2="${y}" stroke="#eee" stroke-width="1"/>`;
+    gridLines += `<text x="${padL-5}" y="${y+4}" text-anchor="end" font-size="10" fill="#bbb">${v}</text>`;
+  }
+  let xLabels = '';
+  const labelInterval = data.length > 14 ? 4 : data.length > 7 ? 2 : 1;
+  data.forEach((d, i) => {
+    if (i % labelInterval === 0 || i === data.length - 1) {
+      const x = padL + i * xStep;
+      xLabels += `<text x="${x}" y="${chartH}" text-anchor="middle" font-size="10" fill="#bbb">${d.date}</text>`;
+    }
+  });
+
+  const lineChart = `<svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%;height:auto">
+    ${gridLines}${xLabels}
+    ${makeLine('smell','#e53935')}${dots('smell','#e53935')}
+    ${makeLine('conf','#43a047')}${dots('conf','#43a047')}
+    <circle cx="${chartW-80}" cy="8" r="4" fill="#e53935"/><text x="${chartW-72}" y="12" font-size="10" fill="#888">냄새</text>
+    <circle cx="${chartW-40}" cy="8" r="4" fill="#43a047"/><text x="${chartW-32}" y="12" font-size="10" fill="#888">자신감</text>
+  </svg>`;
+
+  // Bar chart for supplement
+  const barW = 340, barH = 80;
+  const bStep = data.length > 0 ? (barW - padL - padR) / data.length : 0;
+  let bars = '';
+  data.forEach((d, i) => {
+    const x = padL + i * bStep + bStep * 0.15;
+    const w = bStep * 0.7;
+    const h = d.supp ? (barH - padT - padB) * 0.8 : 0;
+    const y = padT + (barH - padT - padB) - h;
+    if (d.supp) bars += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="#66bb6a"/>`;
+  });
+  const barChart = `<svg viewBox="0 0 ${barW} ${barH}" style="width:100%;height:auto">${bars}</svg>`;
+
+  return `
+    <h3 style="font-size:20px;font-weight:800;color:#333;margin-bottom:16px">변화 추이</h3>
+    <div style="display:flex;gap:8px;margin-bottom:24px">${tabBtn('week','주간')}${tabBtn('month','월간')}</div>
+    <div style="display:flex;gap:10px;margin-bottom:24px">${statCard('평균 냄새',avgSmell,'#e53935')}${statCard('평균 자신감',avgConf,'#43a047')}${statCard('복용률',suppRate+'%','#1e88e5')}</div>
+    <div style="background:#fafafa;border-radius:16px;padding:20px 12px 8px;margin-bottom:20px">
+      <p style="font-size:14px;font-weight:700;color:#555;margin:0 0 12px 4px">입냄새 · 자신감 추이</p>
+      ${valid.length ? lineChart : '<p style="text-align:center;color:#ccc;padding:30px 0;font-size:14px">데이터를 기록하면 그래프가 나타납니다</p>'}
+    </div>
+    <div style="background:#fafafa;border-radius:16px;padding:20px 12px 8px">
+      <p style="font-size:14px;font-weight:700;color:#555;margin:0 0 12px 4px">자일리앤 복용 현황</p>
+      ${barChart}
+    </div>`;
+}
+
+function renderSettings() {
+  const menuItem = (icon, label, sub, onclick, color) => `
+    <button onclick="${onclick}" style="display:flex;align-items:center;gap:16px;width:100%;padding:18px 20px;background:#fafafa;border:1px solid #f0f0f0;border-radius:16px;cursor:pointer;margin-bottom:10px;text-align:left">
+      <span style="font-size:24px">${icon}</span>
+      <div style="flex:1">
+        <p style="margin:0;font-size:16px;font-weight:700;color:${color||'#333'}">${label}</p>
+        ${sub?`<p style="margin:4px 0 0;font-size:12px;color:#aaa">${sub}</p>`:''}
+      </div>
+      <span style="color:#ccc;font-size:18px">›</span>
+    </button>`;
+  return `
+    <h3 style="font-size:20px;font-weight:800;color:#333;margin-bottom:20px">설정</h3>
+    <div style="background:linear-gradient(135deg,#43a047,#66bb6a);border-radius:16px;padding:20px 24px;margin-bottom:24px;color:#fff">
+      <p style="font-size:14px;opacity:0.8">관리중</p>
+      <p style="font-size:22px;font-weight:800;margin:4px 0 0">${state.userName}님</p>
+    </div>
+    ${menuItem('💾','데이터 백업 (다운로드)','JSON 파일로 저장됩니다','exportData()')}
+    <label style="display:block;margin-bottom:10px;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:16px;width:100%;padding:18px 20px;background:#fafafa;border:1px solid #f0f0f0;border-radius:16px">
+        <span style="font-size:24px">📂</span>
+        <div style="flex:1">
+          <p style="margin:0;font-size:16px;font-weight:700;color:#333">데이터 복원 (불러오기)</p>
+          <p style="margin:4px 0 0;font-size:12px;color:#aaa">백업 파일을 선택하세요</p>
+        </div>
+        <span style="color:#ccc;font-size:18px">›</span>
+      </div>
+      <input type="file" accept=".json" onchange="importData(event)" style="display:none">
+    </label>
+    ${menuItem('🛒','자일리앤 재구매','공식 판매처로 이동합니다','openStore()')}
+    ${menuItem('📢','SNS 공유하고 할인쿠폰 받기','커뮤니티/SNS에 공유하면 다음 구매 시 할인!','shareApp()')}
+    <div style="height:1px;background:#eee;margin:20px 0"></div>
+    ${menuItem('🗑️','모든 데이터 초기화','되돌릴 수 없습니다','resetAll()','#e53935')}
+    <div style="text-align:center;padding:20px 0;font-size:12px;color:#ccc">자일리앤 입냄새 관리 앱 v1.0</div>`;
+}
+
+// ─── Actions ───
+function submitName() {
+  const name = document.getElementById('nameInput').value.trim();
+  if (name) { state.userName = name; save('userName', name); render(); }
+}
+function setTab(i) { state.tab = i; render(); window.scrollTo(0,0); }
+function toggleCheck(field) { state.todayData[field] = !state.todayData[field]; saveTodayData(); render(); }
+function setSlider(field, val) { state.todayData[field] = parseInt(val); saveTodayData(); render(); }
+function setStatsRange(r) { state.statsRange = r; render(); }
+
+function exportData() {
+  const blob = new Blob([JSON.stringify({userName:state.userName, data:state.records},null,2)],{type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `xylian_backup_${today()}.json`; a.click(); URL.revokeObjectURL(a.href);
+  alert('백업 파일이 다운로드되었습니다.');
+}
+function importData(e) {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const parsed = JSON.parse(ev.target.result);
+      if (parsed.data) { save('records', parsed.data); state.records = parsed.data; }
+      if (parsed.userName) { save('userName', parsed.userName); state.userName = parsed.userName; }
+      initToday(); render();
+      alert('데이터가 복원되었습니다.');
+    } catch { alert('파일을 읽을 수 없습니다.'); }
+  };
+  reader.readAsText(file);
+}
+function openStore() {
+  window.open('https://m.site.naver.com/2510B', '_blank');
+}
+function shareApp() {
+  const text = '자일리앤으로 입냄새 관리 중! 매일 기록하니까 확실히 달라지는 게 느껴져요 🌿\n\n👉 ';
+  if (navigator.share) {
+    navigator.share({ title: '자일리앤 입냄새 관리', text }).catch(()=>{});
+  } else {
+    navigator.clipboard.writeText(text).then(() => alert('공유 문구가 복사되었습니다.\nSNS에 붙여넣기 하세요!')).catch(()=>{});
+  }
+  alert('🎉 공유 감사합니다!\n다음 구매 시 할인쿠폰이 적용됩니다.');
+}
+function resetAll() {
+  if (confirm('정말 모든 데이터를 삭제하시겠습니까?\n되돌릴 수 없습니다.')) {
+    localStorage.removeItem(SK('userName'));
+    localStorage.removeItem(SK('records'));
+    state.userName = ''; state.records = {}; initToday(); render();
+  }
+}
+
+// ─── Init ───
+let lastDate = today();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && today() !== lastDate) {
+    // 사용자가 오늘 화면을 보고 있었을 때만 자동으로 새 오늘로 전환
+    const wasViewingToday = state.activeDate === lastDate;
+    lastDate = today();
+    if (wasViewingToday) {
+      state.activeDate = today();
+      initToday();
+      render();
+    }
+  }
+});
+setInterval(() => {
+  if (today() !== lastDate) {
+    const wasViewingToday = state.activeDate === lastDate;
+    lastDate = today();
+    if (wasViewingToday) {
+      state.activeDate = today();
+      initToday();
+      render();
+    }
+  }
+}, 60000);
+render();
+</script>
+</body>
+</html>
